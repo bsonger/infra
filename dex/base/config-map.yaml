@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+data:
+  config.yaml: |
+    issuer: https://dex.bei.com/dex
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    logger:
+      level: debug
+      format: text
+    oauth2:
+      skipApprovalScreen: true
+    enablePasswordDB: true
+    staticPasswords:
+      - email: admin@example.com
+        hash: $2y$12$ex0PpqjVkBWwC18sStRujeFLKClHaWgymwhteFQZswOm/3tiQPMb6
+        username: admin
+        userID: "1"
+    staticClients:
+      - id: argocd
+        redirectURIs:
+          - "https://argo.bei.com/auth/callback"   # 外部域名回调
+        name: "Argo CD Dex Client"
+        secret: "argopassword"

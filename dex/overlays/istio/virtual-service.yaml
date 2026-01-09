@@ -1,0 +1,18 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: dex
+spec:
+  gateways:
+  - istio-system/devflow-gateway
+  hosts:
+  - 'dex.bei.com'
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: DEX_SERVICE.DEX_NAMESPACE.svc.cluster.local
+        port:
+          number: 5556
