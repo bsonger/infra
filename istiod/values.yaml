@@ -394,9 +394,9 @@ _internal_defaults_do_not_set:
       # If using stackdriver tracer outside GCP, set env GOOGLE_APPLICATION_CREDENTIALS to the GCP credential file.
       tracer: none
 
-    tracer:
-      zipkin:
-        address: "trace-collector.observability.svc.cluster.local:9411"
+#    tracer:
+#      zipkin:
+#        address: "trace-collector.observability.svc.cluster.local:9411"
     proxy_init:
       # Base name for the proxy_init container, used to configure iptables.
       image: istio/proxyv2:1.27.3
