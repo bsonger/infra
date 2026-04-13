@@ -5,7 +5,16 @@ service:
   port: 5000
 
 mountConfig: true
-persistence: false
+persistence: true
+
+pvc:
+  create: true
+  accessModes:
+    - ReadWriteOnce
+  storage: 20Gi
+
+strategy:
+  type: Recreate
 
 configFiles:
   config.json: |-

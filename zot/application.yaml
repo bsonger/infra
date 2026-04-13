@@ -19,6 +19,9 @@ spec:
     - repoURL: https://github.com/bsonger/infra.git
       targetRevision: main
       ref: values
+    - repoURL: https://github.com/bsonger/infra.git
+      targetRevision: main
+      path: zot/istio
   syncPolicy:
     automated:
       prune: true

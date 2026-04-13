@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: zot
+  namespace: zot
+spec:
+  gateways:
+    - istio-system/devflow-gateway
+  hosts:
+    - zot.bei.com
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: zot.zot.svc.cluster.local
+            port:
+              number: 5000
