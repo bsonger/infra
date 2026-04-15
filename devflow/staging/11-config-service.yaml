@@ -1,0 +1,204 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: config-service-config
+  namespace: devflow-staging
+type: Opaque
+stringData:
+  config.yaml: |
+    server:
+      port: 8082
+    postgres:
+      dsn: "postgresql://app:Sm3MQA5IVcPt1wUiOm1cpEU0w9vJBhPChjoUXcuCGY6cW4Yo9qUkqaNMf1OfrSIi@pg18-rw.database:5432/app"
+      max_open_conns: 20
+      max_idle_conns: 10
+      conn_max_lifetime_minutes: 30
+    log:
+      level: info
+      format: json
+    otel:
+      endpoint: ""
+      service_name: config-service
+    config_repo:
+      root_dir: /app/config-repo
+      default_ref: main
+    pyroscope: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-service-migrations
+  namespace: devflow-staging
+data:
+  0004_add_rendered_configmap_and_workload_configs.sql: |
+    ALTER TABLE configuration_revisions
+      ADD COLUMN IF NOT EXISTS rendered_configmap JSONB NOT NULL DEFAULT '{"data":{}}'::jsonb;
+
+    CREATE TABLE IF NOT EXISTS workload_configs (
+      id UUID PRIMARY KEY,
+      application_id UUID NOT NULL,
+      environment_id TEXT NULL,
+      name TEXT NOT NULL,
+      replicas INTEGER NOT NULL DEFAULT 1,
+      resources JSONB NOT NULL DEFAULT '{}'::jsonb,
+      probes JSONB NOT NULL DEFAULT '{}'::jsonb,
+      env JSONB NOT NULL DEFAULT '[]'::jsonb,
+      workload_type TEXT NOT NULL DEFAULT '',
+      strategy TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL,
+      deleted_at TIMESTAMPTZ NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_workload_configs_scope_name_active
+      ON workload_configs (application_id, COALESCE(environment_id, ''), name)
+      WHERE deleted_at IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_workload_configs_application_id
+      ON workload_configs (application_id);
+  0005_add_platform_metadata_fields.sql: |
+    ALTER TABLE configurations
+      ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS format TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS data TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS labels JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+    ALTER TABLE workload_configs
+      ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS exposed BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS labels JSONB NOT NULL DEFAULT '[]'::jsonb;
+  verify_0003.sql: |
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'configuration_revisions' AND column_name = 'rendered_configmap'
+      ) THEN
+        RAISE EXCEPTION 'missing column: configuration_revisions.rendered_configmap';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_name = 'workload_configs'
+      ) THEN
+        RAISE EXCEPTION 'missing table: workload_configs';
+      END IF;
+    END $$;
+  verify_0004.sql: |
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'configurations' AND column_name = 'description'
+      ) THEN
+        RAISE EXCEPTION 'missing column: configurations.description';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'configurations' AND column_name = 'labels'
+      ) THEN
+        RAISE EXCEPTION 'missing column: configurations.labels';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'workload_configs' AND column_name = 'exposed'
+      ) THEN
+        RAISE EXCEPTION 'missing column: workload_configs.exposed';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'workload_configs' AND column_name = 'labels'
+      ) THEN
+        RAISE EXCEPTION 'missing column: workload_configs.labels';
+      END IF;
+    END $$;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devflow-config-service
+  namespace: devflow-staging
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: devflow-config-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: devflow-config-service
+    spec:
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: aliyun-docker-config
+      initContainers:
+        - name: migrate-config-service-db
+          image: ghcr.io/cloudnative-pg/postgresql:18.3-minimal-trixie
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pg18-app
+                  key: fqdn-uri
+          command: ["/bin/sh", "-c"]
+          args:
+            - psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/0004_add_rendered_configmap_and_workload_configs.sql && psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/0005_add_platform_metadata_fields.sql && psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/verify_0003.sql && psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /migrations/verify_0004.sql
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      containers:
+        - name: devflow-config-service
+          image: registry.cn-hangzhou.aliyuncs.com/devflow/devflow-config-service:staging
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/devflow/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: config-service-migrations
+        - name: config
+          secret:
+            secretName: config-service-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devflow-config-service
+  namespace: devflow-staging
+spec:
+  selector:
+    app.kubernetes.io/name: devflow-config-service
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
+  type: ClusterIP
