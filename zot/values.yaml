@@ -1,0 +1,34 @@
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 5000
+
+mountConfig: true
+persistence: true
+
+pvc:
+  create: true
+  accessModes:
+    - ReadWriteOnce
+  storage: 20Gi
+  storageClassName: local-path
+
+strategy:
+  type: Recreate
+
+configFiles:
+  config.json: |-
+    {
+      "distSpecVersion": "1.1.0",
+      "storage": {
+        "rootDirectory": "/var/lib/registry"
+      },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000"
+      },
+      "log": {
+        "level": "info"
+      }
+    }
